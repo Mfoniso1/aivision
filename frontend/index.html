@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>INTENT-EYE AI // KINETIC SERVO TRACKER</title>
+    <!-- Google Fonts for futuristic cyberpunk styling -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="cyber-scanline"></div>
+    <div class="cyber-grid-bg"></div>
+
+    <div class="app-container">
+        <!-- HEADER MODULE -->
+        <header class="cyber-header">
+            <div class="header-left">
+                <div class="system-status-indicator">
+                    <span class="status-ring glow-idle" id="status-glow"></span>
+                    <span class="status-text" id="status-label">SYS_STANDBY</span>
+                </div>
+                <h1 class="glitch-title" data-text="INTENT-EYE AI">INTENT-EYE AI</h1>
+                <span class="system-version">// v1.4.0-kinetic</span>
+            </div>
+            
+            <div class="header-right">
+                <div class="telemetry-pill">
+                    <span class="pill-label">FPS:</span>
+                    <span class="pill-value text-cyan" id="fps-val">00.0</span>
+                </div>
+                <div class="telemetry-pill">
+                    <span class="pill-label">CPU:</span>
+                    <span class="pill-value text-amber" id="cpu-val">00%</span>
+                </div>
+                <div class="telemetry-pill">
+                    <span class="pill-label">TEMP:</span>
+                    <span class="pill-value text-red" id="temp-val">00.0°C</span>
+                </div>
+                <div class="telemetry-pill">
+                    <span class="pill-label">PLATFORM:</span>
+                    <span class="pill-value" id="platform-val">DETECTOR</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- MAIN LAYOUT -->
+        <main class="dashboard-grid">
+            
+            <!-- LEFT PANEL: TACTICAL CAMERA FEED -->
+            <section class="dashboard-card camera-card">
+                <div class="card-header">
+                    <span class="corner-bracket-tl"></span>
+                    <span class="corner-bracket-tr"></span>
+                    <h2>[01] OPTICAL FEED & TARGET LOCK</h2>
+                    <div class="card-header-badge">LIVE STREAM</div>
+                </div>
+                <div class="card-body feed-viewport">
+                    <!-- Live Annotated Stream from FastAPI -->
+                    <img id="camera-feed" src="/video_feed" alt="TACTICAL CAMERA STREAM" class="live-stream-image">
+                    
+                    <!-- Futuristic Rotating Lock Reticle Overlay -->
+                    <div class="targeting-reticle" id="reticle">
+                        <div class="reticle-ring-outer"></div>
+                        <div class="reticle-ring-inner"></div>
+                        <div class="reticle-crosshair"></div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <div class="footer-stat">
+                        <span>LATENCY:</span>
+                        <span id="latency-val" class="text-cyan">0ms</span>
+                    </div>
+                    <div class="footer-stat">
+                        <span>RESOL:</span>
+                        <span class="text-white">640x480 @ 30fps</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- CENTER PANEL: REAL-TIME TELEMETRY -->
+            <section class="dashboard-card telemetry-card">
+                <div class="card-header">
+                    <span class="corner-bracket-tl"></span>
+                    <span class="corner-bracket-tr"></span>
+                    <h2>[02] SERVO ORIENTATION & INTENT</h2>
+                </div>
+                <div class="card-body">
+                    <!-- Dynamic Intent Progress Ring -->
+                    <div class="intent-gauge-container" id="intent-gauge-wrapper">
+                        <div class="intent-label-box">
+                            <span class="intent-caption">INTENT CONFIDENCE</span>
+                            <span class="intent-percentage" id="intent-val">0%</span>
+                        </div>
+                        <div class="intent-bar-outer">
+                            <div class="intent-bar-inner" id="intent-progress"></div>
+                        </div>
+                    </div>
+
+                    <!-- Security Evasion Progress Ring -->
+                    <div class="intent-gauge-container hide-metric" id="evasion-gauge-wrapper">
+                        <div class="intent-label-box">
+                            <span class="intent-caption" style="color: #ff3333;">EVASION DETECTION THREAT</span>
+                            <span class="intent-percentage text-red" id="evasion-val">0%</span>
+                        </div>
+                        <div class="intent-bar-outer">
+                            <div class="intent-bar-inner bg-red" id="evasion-progress"></div>
+                        </div>
+                    </div>
+
+                    <!-- Health Fatigue & Distress Rings -->
+                    <div class="intent-gauge-container hide-metric" id="health-gauges-wrapper">
+                        <div style="margin-bottom: 12px;">
+                            <div class="intent-label-box">
+                                <span class="intent-caption" style="color: #ffaa00;">FATIGUE INDEX</span>
+                                <span class="intent-percentage text-amber" id="fatigue-val">0%</span>
+                            </div>
+                            <div class="intent-bar-outer">
+                                <div class="intent-bar-inner bg-amber" id="fatigue-progress"></div>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="intent-label-box">
+                                <span class="intent-caption" style="color: #00ff7f;">DISTRESS INDEX</span>
+                                <span class="intent-percentage text-green" id="distress-val">0%</span>
+                            </div>
+                            <div class="intent-bar-outer">
+                                <div class="intent-bar-inner bg-green" id="distress-progress"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dual Gauge SVG Dials -->
+                    <div class="dials-grid">
+                        <div class="dial-wrapper">
+                            <svg class="dial-svg" viewBox="0 0 100 100">
+                                <circle class="dial-bg" cx="50" cy="50" r="40" />
+                                <circle class="dial-fill" id="pan-dial" cx="50" cy="50" r="40" stroke-dasharray="251.2" stroke-dashoffset="125.6" />
+                            </svg>
+                            <div class="dial-reading">
+                                <span class="dial-angle" id="pan-val">90.0°</span>
+                                <span class="dial-caption">PAN ANGLE (H)</span>
+                            </div>
+                        </div>
+
+                        <div class="dial-wrapper">
+                            <svg class="dial-svg" viewBox="0 0 100 100">
+                                <circle class="dial-bg" cx="50" cy="50" r="40" />
+                                <circle class="dial-fill" id="tilt-dial" cx="50" cy="50" r="40" stroke-dasharray="251.2" stroke-dashoffset="125.6" />
+                            </svg>
+                            <div class="dial-reading">
+                                <span class="dial-angle" id="tilt-val">90.0°</span>
+                                <span class="dial-caption">TILT ANGLE (V)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3D Euler Angles Coordinates -->
+                    <div class="pose-coordinates-grid">
+                        <div class="pose-coord-card">
+                            <span class="coord-label">HEAD_YAW (L/R)</span>
+                            <span class="coord-value" id="yaw-val">0.00°</span>
+                        </div>
+                        <div class="pose-coord-card">
+                            <span class="coord-label">HEAD_PITCH (U/D)</span>
+                            <span class="coord-value" id="pitch-val">0.00°</span>
+                        </div>
+                        <div class="pose-coord-card">
+                            <span class="coord-label">HEAD_ROLL (TILT)</span>
+                            <span class="coord-value" id="roll-val">0.00°</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- RIGHT PANEL: CONTROL & PARAMETER TUNING -->
+            <section class="dashboard-card control-card">
+                <div class="card-header">
+                    <span class="corner-bracket-tl"></span>
+                    <span class="corner-bracket-tr"></span>
+                    <h2>[03] COMMAND & TUNING CENTER</h2>
+                </div>
+                <div class="card-body">
+                    <!-- Profile Switcher Button Grid -->
+                    <div class="profile-switcher-container">
+                        <span class="panel-section-title">ACTIVE TRACKING PROFILE</span>
+                        <div class="profile-btn-grid">
+                            <button class="profile-btn active" id="profile-tracking-btn">TACTICAL TRACK</button>
+                            <button class="profile-btn" id="profile-security-btn">SECURITY SENTRY</button>
+                            <button class="profile-btn" id="profile-health-btn">BIOMETRIC HEALTH</button>
+                        </div>
+                    </div>
+
+                    <!-- Control Modes Toggles -->
+                    <div class="control-row">
+                        <span class="control-label">AUTONOMOUS TRACKING:</span>
+                        <label class="switch">
+                            <input type="checkbox" id="auto-mode-toggle" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="control-row" id="sweep-control-row">
+                        <span class="control-label">SEARCH SWEEP PATTERN:</span>
+                        <label class="switch">
+                            <input type="checkbox" id="sweep-toggle" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <!-- Virtual Manual Override Zone -->
+                    <div class="manual-override-panel disabled" id="manual-panel">
+                        <div class="panel-section-title">VIRTUAL MANUAL JOYSTICK</div>
+                        <div class="joystick-boundary">
+                            <div class="joystick-knob" id="joystick"></div>
+                            <div class="joystick-center-marker">+</div>
+                        </div>
+                        
+                        <div class="manual-sliders">
+                            <div class="slider-wrapper">
+                                <label>PAN OVERRIDE: <span id="pan-slider-val">90°</span></label>
+                                <input type="range" id="pan-slider" min="10" max="170" value="90">
+                            </div>
+                            <div class="slider-wrapper">
+                                <label>TILT OVERRIDE: <span id="tilt-slider-val">90°</span></label>
+                                <input type="range" id="tilt-slider" min="30" max="150" value="90">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PID Tuning Interface -->
+                    <div class="pid-tuning-panel">
+                        <div class="panel-section-title">MG995 DUAL-AXIS PID TUNING</div>
+                        
+                        <!-- Pan Axis Parameters -->
+                        <div class="pid-axis-header">PAN AXIS (H)</div>
+                        <div class="pid-inputs-row">
+                            <div class="pid-input-group">
+                                <label>Kp</label>
+                                <input type="number" id="kp-p-input" step="0.5" value="24.0">
+                            </div>
+                            <div class="pid-input-group">
+                                <label>Ki</label>
+                                <input type="number" id="ki-p-input" step="0.01" value="0.05">
+                            </div>
+                            <div class="pid-input-group">
+                                <label>Kd</label>
+                                <input type="number" id="kd-p-input" step="0.05" value="0.40">
+                            </div>
+                        </div>
+
+                        <!-- Tilt Axis Parameters -->
+                        <div class="pid-axis-header">TILT AXIS (V)</div>
+                        <div class="pid-inputs-row">
+                            <div class="pid-input-group">
+                                <label>Kp</label>
+                                <input type="number" id="kp-t-input" step="0.5" value="24.0">
+                            </div>
+                            <div class="pid-input-group">
+                                <label>Ki</label>
+                                <input type="number" id="ki-t-input" step="0.01" value="0.05">
+                            </div>
+                            <div class="pid-input-group">
+                                <label>Kd</label>
+                                <input type="number" id="kd-t-input" step="0.05" value="0.40">
+                            </div>
+                        </div>
+
+                        <button class="cyber-btn" id="save-pid-btn">COMMIT PID COEFFS</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- FOOTER: CHRONO-TELEMETRY GRAPH PANEL -->
+        <footer class="chrono-graph-card">
+            <div class="card-header">
+                <span class="corner-bracket-tl"></span>
+                <span class="corner-bracket-tr"></span>
+                <h2>[04] HISTORICAL WAVEFORM ANALYZER</h2>
+                <div class="graph-legend">
+                    <span class="legend-item"><span class="legend-color bg-cyan"></span> PAN POSITION</span>
+                    <span class="legend-item"><span class="legend-color bg-yellow"></span> TILT POSITION</span>
+                    <span class="legend-item"><span class="legend-color bg-green"></span> INTENT CONFIDENCE</span>
+                </div>
+            </div>
+            <div class="card-body graph-container">
+                <canvas id="telemetry-chart"></canvas>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>
