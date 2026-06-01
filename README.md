@@ -1,151 +1,131 @@
-# Intent-Eye AI // Kinetic Pan-Tilt Servo Tracker
+# 🍓 Raspberry Pi Gaze Intent-Eye Client (`ai_vision_model`)
 
-An autonomous computer vision system designed for **Raspberry Pi** and standard **USB/Pi Cameras**. It utilizes a 3D Head Pose gaze estimation model to calculate human "intent to interact" and controls a dual-axis pan-tilt mechanism using high-torque **MG995 metal gear servos** driven by a closed-loop PID controller.
+A lightweight, standalone, high-performance edge client designed to capture local camera frames, stream them to a self-hosted AI model server, and drive pan-tilt servos (e.g., MG995) in real-time using a local PID control loop based on human "intent to interact."
 
-A stunning **Cyberpunk Space-Tech Telemetry Web Dashboard** allows you to view live optical overlays, monitor real-time angles, plot historical trajectories, tune PID coefficients on the fly, and take manual joystick override.
-
----
-
-## 1. Hardware Connection Architecture
-
-> [!WARNING]
-> **DO NOT POWER THE MG995 SERVOS DIRECTLY FROM THE RASPBERRY PI'S 5V PINS!**
-> Standard SG90 servos draw up to 600mA, but heavy-duty MG995 metal gear servos pull up to **1.2A to 1.5A under load or stall**. Powering them directly from the Pi will instantly trigger a voltage brownout and crash the Pi's CPU, and can permanently damage the Pi's GPIO rail.
-
-### Recommended Wiring Blueprint
-
-To power and control the servos safely, you need an **external 5V (or 6V) DC power supply rated for at least 2.5A to 3.0A**.
-
-```
-                           +----------------------+
-                           |   External 5V / 6V   |
-                           |   Power Supply       |
-                           |   (2.5A - 3.0A+)     |
-                           +--+---------------+---+
-                              |               |
-                              | 5V (Red)      | GND (Black)
-                              v               v
-                        +-----+---------------+-----+
-                        |                           |
-                        |   Common Junction Block   |
-                        |                           |
-                        +--+--------+--------+------+
-                           |        |        |
-         +-----------------+        |        +---------------------+
-         | 5V Power                 | 5V Power                     | GND
-         v                          v                              v
-   +-----+-----+              +-----+-----+                  +-----+-----+
-   |           |              |           |                  |           |
-   |   MG995   |              |   MG995   |                  | Raspberry |
-   |   PAN     |              |   TILT    |                  | Pi 4 / 5  |
-   |   SERVO   |              |   SERVO   |                  | GPIO GND  |
-   |  (Pin 18) |              |  (Pin 23) |                  |  (Pin 6)  |
-   +-----+-----+              +-----+-----+                  +-----+-----+
-         |                          |                              |
-         | Signal                   | Signal                       |
-         | (Yellow/Orange)          | (Yellow/Orange)              |
-         v                          v                              |
-   +-----+--------------------------+------------------------------+-----+
-   | GPIO 18 (PWM)               GPIO 23                         GND     |
-   |                                                                     |
-   |                    RASPBERRY PI GPIO HEADER RAILS                   |
-   +---------------------------------------------------------------------+
-```
-
-### Connector Details (Standard MG995 Pinout)
-*   **Brown Wire:** Ground (GND) -> Connect to External GND **AND** Raspberry Pi GPIO Ground (e.g., Pin 6, 9, 14, 20, 25, 30, 34, 39).
-*   **Red Wire:** Power (VCC, 4.8V - 7.2V) -> Connect to External Power supply (+) terminal.
-*   **Yellow/Orange Wire:** PWM Signal -> 
-    *   **Pan Servo**: Connect to Raspberry Pi **GPIO 18** (Pin 12 on header).
-    *   **Tilt Servo**: Connect to Raspberry Pi **GPIO 23** (Pin 16 on header).
+This repository has been fully optimized for edge deployment (such as on the Raspberry Pi) with **zero local machine learning package overhead** (no local MediaPipe, no local PyTorch, no heavy dependencies).
 
 ---
 
-## 2. Software Installation & Setup
+## 🔬 Core System Architecture
 
-### A. Clone & Establish Virtual Environment
-First, ensure python is installed on your machine. Open a terminal/powershell inside the `ai_vision_model` directory:
-
-```bash
-# Create a virtual environment
-python -m venv venv
-
-# Activate on Windows (Powershell)
-.\venv\Scripts\Activate.ps1
-
-# Activate on Linux / Raspberry Pi
-source venv/bin/activate
+```
+ +-----------------------------------------------------------------+
+ |                    EXTERNAL SELF-HOSTED MODEL                   |
+ |  (Any server hosting your vision/intent model, e.g. FastAPI,    |
+ |   Ollama, custom CNN, or VLM endpoint)                          |
+ |  - Accepts JPEG images (via HTTP POST or WebSocket)             |
+ |  - Returns JSON intent/coordinate telemetry                    |
+ +-----------------------------------------------------------------+
+                                 ^
+                                 | Configurable API Calls
+                                 | (HTTP POST or WebSocket)
+                                 v
+ +-----------------------------------------------------------------+
+ |                 EDGE / TARGET DEVICE (Raspberry Pi)             |
+ |  - Runs `intent_detector.py` (Lightweight Python Client)        |
+ |  - Reads camera frame -> Compresses to JPEG                     |
+ |  - Sends frame to Self-Hosted Model API                         |
+ |  - Receives target JSON -> Filters coordinates via EMA          |
+ |  - Feeds Dwell-Time State Machine -> Updates PID Loop           |
+ |  - Drives physical servos via pigpio/gpiozero (or Simulation)   |
+ +-----------------------------------------------------------------+
 ```
 
-### B. Install Python Dependencies
-Install the required core computer vision, server, and utility libraries:
+### 🧠 Research-Backed Intent Logic
+1. **The Engagement Cone (Gaze Deflection):** Uses the Euclidean norm of head yaw and pitch angular deflection relative to the camera axis. Gaze deviation $\le 22.0^\circ$ registers "potential intent to interact."
+2. **Dwell-Time State Machine:** Transitions between `IDLE` $\rightarrow$ `SEARCHING` $\rightarrow$ `POTENTIAL_INTENT` $\rightarrow$ `ENGAGED`. Requires the user to look at the device for at least $0.6$ seconds before triggering locked tracking, preventing accidental glances from swinging the camera.
+3. **EMA Coordinate Smoothing:** Applies a real-time Exponential Moving Average filter on target coordinates to prevent high-frequency servo jitter and grinding.
 
-```bash
-pip install -r requirements.txt
+---
+
+## 📦 Project Structure
+
+```
+.
+├── intent_detector.py      # Core edge client (Camera capture, API stream, PID, Servos)
+├── config.json             # Central configuration (pins, PID gains, API url, intent cone)
+├── requirements.txt        # Minimal Python dependencies
+└── README.md               # Deployment manual
 ```
 
-### C. (Raspberry Pi Only) Setup Jitter-Free Hardware PWM
-To prevent the MG995 from twitching or jittering (which occurs with standard software PWM libraries due to CPU thread scheduling delays), we utilize the hardware-accurate **pigpio** daemon:
+---
+
+## 🛠️ Step-by-Step Raspberry Pi Setup
+
+### 1. Install System Requirements & Enable PWM Daemon
+Log into your Raspberry Pi terminal and run:
 
 ```bash
-# Install the pigpio package and system daemon
+# 1. Update packages and install the pigpio system daemon (crucial for jitter-free PWM)
 sudo apt-get update
 sudo apt-get install pigpio python3-pigpio -y
 
-# Start and enable the pigpio background service
+# 2. Enable and start the background hardware PWM service
 sudo systemctl enable pigpiod
 sudo systemctl start pigpiod
 ```
 
-*Note: If `pigpio` is not running or not installed, the software will automatically fall back to `gpiozero` software PWM, and if not running on Linux, it will enter simulation mode.*
+### 2. Install Python Dependencies
+Inside your project directory, run:
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Connect the Servos (MG995)
+Attach your pan-tilt servo motor control lines directly to your Raspberry Pi GPIO header pins:
+* **Pan Servo (Horizontal):** GPIO 18 (Pin 12)
+* **Tilt Servo (Vertical):** GPIO 23 (Pin 16)
+* **Power:** Ensure your MG995 servos are powered by an external 5V/6V supply (do not power them directly from the Pi's 5V pin, as current draw can cause a brownout/reset). Connect the Pi's GND pin to the external power supply GND.
 
 ---
 
-## 3. Execution & Deployment
+## ⚙️ Configuration (`config.json`)
 
-### A. Testing on Windows (High-Fidelity Simulation Mode)
-You can run and verify the entire AI pipeline, head-pose angles, intent detection, and PID tracking loops on your laptop using a standard webcam before mounting the hardware:
+Configure your server endpoint, camera dimensions, servo pins, and PID constants directly inside `config.json`:
 
-```powershell
-python backend/app.py
+```json
+{
+  "api": {
+    "mode": "HTTP",
+    "url": "http://<YOUR_MODEL_SERVER_IP>:8000/predict",
+    "timeout_seconds": 2.0
+  },
+  "camera": {
+    "index": 0,
+    "width": 640,
+    "height": 480,
+    "jpeg_quality": 80
+  },
+  "servos": {
+    "pan_pin": 18,
+    "tilt_pin": 23,
+    "pid": {
+      "kp_pan": 24.0,
+      "ki_pan": 0.05,
+      "kd_pan": 0.4,
+      "kp_tilt": 24.0,
+      "ki_tilt": 0.05,
+      "kd_tilt": 0.4
+    }
+  },
+  "intent": {
+    "engagement_cone_deg": 22.0,
+    "dwell_time_seconds": 0.6,
+    "ema_beta": 0.65
+  }
+}
 ```
 
-1. The terminal will indicate that the hardware driver is in `SIMULATION` mode.
-2. Open your web browser and navigate to **`http://localhost:8000`**.
-3. You will see a beautiful dark-mode space dashboard.
-4. Align your head with the camera:
-   - When looking away, the status will show `SEARCHING` and the virtual servos will sweep horizontally.
-   - When looking directly at the camera, the status will switch to `ENGAGED` (Intent Detected). The targeting crosshair will lock onto your nose and spin.
-   - Look around or move: the **Virtual Gauges** and **Chrono Telemetry Waveform** will show the active PID loop smoothly adjusting the virtual pan and tilt servos to center your face!
-5. Toggle to **Manual Override** to test joystick control and sliders, or tune the PID constants.
+---
 
-### B. Running on Raspberry Pi (Real-Time Servo Control Mode)
-Once your servos and camera are wired according to the blueprint, run:
+## 🚀 Execution
+
+To start the standalone client loop:
 
 ```bash
-python backend/app.py
+python intent_detector.py
 ```
 
-1. The console will report `[SERVO] Initialized MG995 hardware on GPIO 18/23 using pigpio.`
-2. Access the dashboard from any device on your local network by navigating to: `http://<YOUR_PI_IP_ADDRESS>:8000` (e.g. `http://192.168.1.45:8000`).
-3. Sit back and watch the physical pan/tilt camera autonomously rotate to find, engage, lock onto, and track you based on your intent!
-
----
-
-## 4. Tuning the PID Loop
-
-The MG995 is an extremely powerful, high-torque servo. Out-of-the-box servos can overshoot or oscillate wildly if the feedback loop gains are too aggressive.
-Our dashboard allows you to tune these variables in real-time under **[03] COMMAND & TUNING CENTER**:
-
-*   **$K_p$ (Proportional Gain):** Determines how fast the servo responds to target error. If the face is far from the center, a higher $K_p$ commands a larger speed step.
-    *   *Symptom of too high:* Fast shaking, violent oscillation around the target center.
-    *   *Symptom of too low:* Extremely slow, sluggish tracking.
-*   **$K_i$ (Integral Gain):** Corrects steady-state tracking offsets. Fills in the missing torque if the camera gets stuck slightly off-center.
-    *   *Symptom of too high:* Constant drifting back and forth.
-    *   *Symptom of too low:* Camera centers near you but stops short of absolute precision.
-*   **$K_d$ (Derivative Gain):** Provides dampening against sudden accelerations, smoothing the approach as the face returns to the center.
-    *   *Symptom of too high:* Grinding sounds or stiff, jerky movements.
-    *   *Symptom of too low:* Overshooting the center, swinging past your nose, then having to correct back.
-
-### Real-Time Commit
-Modify the values on the panel and click **COMMIT PID COEFFS** to inject the new parameters into the active control loop instantly without restarting the server!
+### 🔄 Auto-Actuation Modes
+* **Pi Hardware Mode:** If `pigpio` or `gpiozero` is detected, it immediately drives your physical servos using hardware PWM.
+* **Console Simulation Mode:** If run on a non-Pi device (such as your local Windows/Mac PC for testing), the script gracefully falls back to logging the calculated virtual servo angles, allowing you to debug the camera feed, API responses, and Dwell State Machine without crashing.

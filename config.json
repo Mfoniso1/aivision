@@ -1,0 +1,30 @@
+{
+  "api": {
+    "mode": "HTTP",
+    "url": "http://localhost:8000/predict",
+    "timeout_seconds": 2.0
+  },
+  "camera": {
+    "index": 0,
+    "width": 640,
+    "height": 480,
+    "jpeg_quality": 80
+  },
+  "servos": {
+    "pan_pin": 18,
+    "tilt_pin": 23,
+    "pid": {
+      "kp_pan": 24.0,
+      "ki_pan": 0.05,
+      "kd_pan": 0.4,
+      "kp_tilt": 24.0,
+      "ki_tilt": 0.05,
+      "kd_tilt": 0.4
+    }
+  },
+  "intent": {
+    "engagement_cone_deg": 22.0,
+    "dwell_time_seconds": 0.6,
+    "ema_beta": 0.65
+  }
+}
