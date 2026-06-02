@@ -9,6 +9,9 @@ API_MODE = "HTTP"
 API_URL = "http://127.0.0.1:5050/api/v1/intent"
 API_TIMEOUT = 2.0
 
+# Optional API authentication key for Cloud-hosted models (e.g. Hugging Face, Roboflow, AWS)
+API_KEY = ""
+
 # Video source: Can be a remote MJPEG stream URL or a physical camera index (0, 1, etc.)
 VIDEO_SOURCE = "http://127.0.0.1:8000/stream.mjpg"
 

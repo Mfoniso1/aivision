@@ -202,11 +202,17 @@ class StandaloneIntentTracker:
 
     def send_frame_http(self, url, jpeg_bytes, timeout):
         """
-        Sends frame using HTTP multipart POST.
+        Sends frame using HTTP multipart POST. Supports secure API keys.
         """
         try:
             files = {"file": ("frame.jpg", jpeg_bytes, "image/jpeg")}
-            response = requests.post(url, files=files, timeout=timeout)
+            headers = {}
+            api_key = getattr(config, "API_KEY", "")
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+                headers["X-API-Key"] = api_key
+                
+            response = requests.post(url, files=files, headers=headers, timeout=timeout)
             if response.status_code == 200:
                 return response.json()
             else:
@@ -227,7 +233,12 @@ class StandaloneIntentTracker:
         try:
             if not self.ws_conn:
                 print(f"[API] Connecting WebSocket to {url} ...")
-                self.ws_conn = websocket.create_connection(url, timeout=2.0)
+                headers = []
+                api_key = getattr(config, "API_KEY", "")
+                if api_key:
+                    headers.append(f"Authorization: Bearer {api_key}")
+                    headers.append(f"X-API-Key: {api_key}")
+                self.ws_conn = websocket.create_connection(url, timeout=2.0, header=headers)
                 print("[API] WebSocket Connected.")
                 
             # Send binary image
