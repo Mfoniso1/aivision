@@ -3,3 +3,4 @@ requests>=2.31.0
 websocket-client>=1.6.0
 numpy>=1.24.0
 adafruit-circuitpython-servokit>=1.3.0
+mediapipe>=0.10.0

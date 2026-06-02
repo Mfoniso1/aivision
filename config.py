@@ -2,8 +2,8 @@
 # CAMERA & API STREAM
 # =========================
 
-# API connection mode: "HTTP" or "WEBSOCKET"
-API_MODE = "HTTP"
+# API connection mode: "LOCAL" (offline MediaPipe), "HTTP" (remote backend), or "WEBSOCKET"
+API_MODE = "LOCAL"
 
 # Remote self-hosted AI model server endpoint (using custom port 5050 and isolated path)
 API_URL = "http://127.0.0.1:5050/api/v1/intent"

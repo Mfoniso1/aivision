@@ -22,6 +22,92 @@ try:
 except ImportError:
     HAS_SERVOKIT = False
 
+# Try importing Google MediaPipe for local mode
+try:
+    import mediapipe as mp
+    HAS_MEDIAPIPE = True
+except ImportError:
+    HAS_MEDIAPIPE = False
+
+class LocalGazeEstimator:
+    def __init__(self):
+        if not HAS_MEDIAPIPE:
+            raise ImportError(
+                "[ERROR] mediapipe is not installed. To run in 'LOCAL' mode, "
+                "please run 'pip install mediapipe' on your system."
+            )
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(
+            max_num_faces=1,
+            refine_landmarks=True,  # Critical: enables iris center tracking (points 468 and 473)
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+
+    def process_frame(self, frame):
+        """
+        Processes BGR frame, calculates facial landmarks, and computes gaze yaw/pitch.
+        """
+        # Convert BGR frame to RGB for MediaPipe
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.face_mesh.process(rgb_frame)
+        
+        if not results.multi_face_landmarks:
+            return None
+            
+        landmarks = results.multi_face_landmarks[0].landmark
+        
+        # Coordinates for gaze tracking (Left Eye outer 33, inner 133, pupil 468)
+        l_outer = np.array([landmarks[33].x, landmarks[33].y, landmarks[33].z])
+        l_inner = np.array([landmarks[133].x, landmarks[133].y, landmarks[133].z])
+        l_eye_center = (l_outer + l_inner) / 2.0
+        l_iris = np.array([landmarks[468].x, landmarks[468].y, landmarks[468].z])
+        
+        # Coordinates for Right Eye (outer 263, inner 362, pupil 473)
+        r_outer = np.array([landmarks[263].x, landmarks[263].y, landmarks[263].z])
+        r_inner = np.array([landmarks[362].x, landmarks[362].y, landmarks[362].z])
+        r_eye_center = (r_outer + r_inner) / 2.0
+        r_iris = np.array([landmarks[473].x, landmarks[473].y, landmarks[473].z])
+        
+        # Calculate eye width dimensions as normalizers
+        l_width = np.linalg.norm(l_outer - l_inner)
+        r_width = np.linalg.norm(r_outer - r_inner)
+        
+        # Compute horizontal and vertical pupil displacements
+        # Normalize by eye width to stay invariant to distance from camera
+        l_gaze_x = (l_iris[0] - l_eye_center[0]) / (l_width + 1e-6)
+        l_gaze_y = (l_iris[1] - l_eye_center[1]) / (l_width * 0.55 + 1e-6)
+        
+        r_gaze_x = (r_iris[0] - r_eye_center[0]) / (r_width + 1e-6)
+        r_gaze_y = (r_iris[1] - r_eye_center[1]) / (r_width * 0.55 + 1e-6)
+        
+        # Average left & right gaze vectors
+        gaze_x = (l_gaze_x + r_gaze_x) / 2.0
+        gaze_y = (l_gaze_y + r_gaze_y) / 2.0
+        
+        # Map pupil displacement coordinates to approximate deflection degrees
+        yaw_deg = -gaze_x * 45.0
+        pitch_deg = -gaze_y * 45.0
+        
+        # Compute face center (normalized coords, 0.0 to 1.0)
+        x_coords = [lm.x for lm in landmarks]
+        y_coords = [lm.y for lm in landmarks]
+        target_x = np.mean(x_coords)
+        target_y = np.mean(y_coords)
+        
+        # Compute intent score (100% when looking straight, drops as gaze deflects)
+        gaze_deflection = np.sqrt(yaw_deg**2 + pitch_deg**2)
+        intent_score = max(0, min(100, int(100 * (1.0 - (gaze_deflection / 45.0)))))
+        
+        return {
+            "face_detected": True,
+            "target_x": target_x,
+            "target_y": target_y,
+            "yaw": float(yaw_deg),
+            "pitch": float(pitch_deg),
+            "intent_score": intent_score
+        }
+
 # =====================================================================
 # 1. CORE CONTROL & ACTUATION MODULES
 # =====================================================================
@@ -192,6 +278,13 @@ class StandaloneIntentTracker:
         self.cam_w = config.FRAME_WIDTH
         self.cam_h = config.FRAME_HEIGHT
         self.jpeg_quality = config.JPEG_QUALITY
+        
+        # Local offline gaze mesh engine
+        self.local_gaze = None
+        if config.API_MODE == "LOCAL":
+            print("[SYSTEM] Initializing Google MediaPipe Face Mesh locally...")
+            self.local_gaze = LocalGazeEstimator()
+            print("[SYSTEM] Local MediaPipe face mesh loaded successfully.")
         
         # Threading and Loop parameters
         self.running = False
@@ -416,9 +509,12 @@ class StandaloneIntentTracker:
                     
                 jpeg_bytes = jpeg_buf.tobytes()
                 
-                # 2. Send image to self-hosted model
+                # 2. Process image (natively in-memory or over network)
                 telemetry = None
-                if api_mode == "WEBSOCKET":
+                if api_mode == "LOCAL":
+                    if self.local_gaze:
+                        telemetry = self.local_gaze.process_frame(frame)
+                elif api_mode == "WEBSOCKET":
                     telemetry = self.send_frame_ws(api_url, jpeg_bytes)
                 else:
                     telemetry = self.send_frame_http(api_url, jpeg_bytes, api_timeout)
