@@ -188,7 +188,7 @@ class StandaloneIntentTracker:
         self.sweep_speed = 0.8
         
         # Video Capture Setup
-        self.cam_index = config.CAMERA_INDEX
+        self.video_source = config.VIDEO_SOURCE
         self.cam_w = config.FRAME_WIDTH
         self.cam_h = config.FRAME_HEIGHT
         self.jpeg_quality = config.JPEG_QUALITY
@@ -359,35 +359,19 @@ class StandaloneIntentTracker:
         self.running = True
         print("[SYSTEM] Booting standalone intent detector client loop...")
         
-        # Open Camera with automatic multi-index fallback scan
-        cap = None
-        opened_index = -1
-        
-        # Build search list (trying configured index first, then typical fallbacks)
-        search_indices = [self.cam_index]
-        for fallback in [0, 1, 2, 4]:
-            if fallback not in search_indices:
-                search_indices.append(fallback)
-                
-        for idx in search_indices:
-            print(f"[SYSTEM] Attempting to open camera at index {idx}...")
-            test_cap = cv2.VideoCapture(idx)
-            if test_cap.isOpened():
-                # Verify if we can read a frame (important on Pi where some fake indices open but return empty)
-                ret, _ = test_cap.read()
-                if ret:
-                    cap = test_cap
-                    opened_index = idx
-                    print(f"[SYSTEM] Successfully verified and opened camera index {idx}!")
-                    break
-                test_cap.release()
-            else:
-                test_cap.release()
+        # Parse video source (support remote stream URLs or integer camera indices)
+        source = self.video_source
+        if isinstance(source, str) and source.isdigit():
+            source = int(source)
             
-        if cap is None:
-            print(f"[FATAL] Cannot open or read from any camera indices {search_indices}. Exiting.")
+        print(f"[SYSTEM] Attempting to open video source: {source}...")
+        cap = cv2.VideoCapture(source)
+        
+        if not cap.isOpened():
+            print(f"[FATAL] Cannot open video source: {source}. Exiting.")
             return
             
+        print(f"[SYSTEM] Successfully opened video source: {source}")
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cam_w)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cam_h)
         

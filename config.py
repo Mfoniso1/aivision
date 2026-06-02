@@ -9,7 +9,9 @@ API_MODE = "HTTP"
 API_URL = "http://192.168.1.100:5050/api/v1/intent"
 API_TIMEOUT = 2.0
 
-CAMERA_INDEX = 0
+# Video source: Can be a remote MJPEG stream URL or a physical camera index (0, 1, etc.)
+VIDEO_SOURCE = "http://127.0.0.1:8000/stream.mjpg"
+
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 JPEG_QUALITY = 80
