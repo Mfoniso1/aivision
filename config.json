@@ -11,8 +11,8 @@
     "jpeg_quality": 80
   },
   "servos": {
-    "pan_pin": 18,
-    "tilt_pin": 23,
+    "pan_channel": 0,
+    "tilt_channel": 2,
     "pid": {
       "kp_pan": 24.0,
       "ki_pan": 0.05,

@@ -14,18 +14,12 @@ try:
 except ImportError:
     HAS_WEBSOCKET = False
 
-# Try importing Raspberry Pi hardware GPIO libraries
+# Try importing Adafruit PCA9685 ServoKit
 try:
-    import pigpio
-    HAS_PIGPIO = True
+    from adafruit_servokit import ServoKit
+    HAS_SERVOKIT = True
 except ImportError:
-    HAS_PIGPIO = False
-
-try:
-    from gpiozero import AngularServo
-    HAS_GPIOZERO = True
-except ImportError:
-    HAS_GPIOZERO = False
+    HAS_SERVOKIT = False
 
 # =====================================================================
 # 1. CORE CONTROL & ACTUATION MODULES
@@ -81,109 +75,76 @@ class PIDController:
         return output
 
 class MG995ServoDriver:
-    def __init__(self, pan_pin=18, tilt_pin=23):
+    def __init__(self, pan_channel=0, tilt_channel=2):
         """
         Dual-axis servo controller designed for physical MG995 servos.
-        Falls back automatically through pigpio -> gpiozero -> SIMULATION.
+        Uses Adafruit PCA9685 16-Channel I2C driver (ServoKit) on Pi.
+        Falls back to high-fidelity console SIMULATION on non-Pi platforms.
         """
-        self.pan_pin = pan_pin
-        self.tilt_pin = tilt_pin
+        self.pan_channel = pan_channel
+        self.tilt_channel = tilt_channel
         
-        self.pulse_min = 500.0
-        self.pulse_max = 2500.0
+        # Matches your exact hardware limits (0 to 180 deg)
+        self.pan_limits = (0.0, 180.0)
+        self.tilt_limits = (0.0, 180.0)
         
-        self.pan_angle = 90.0
+        # Matches your exact startup positions
+        self.pan_angle = 180.0
         self.tilt_angle = 90.0
         
-        self.pan_limits = (10.0, 170.0)
-        self.tilt_limits = (30.0, 150.0)
-        
         self.mode = "SIMULATION"
-        self.pi = None
-        self.servos = {}
+        self.kit = None
         
         self.init_hardware()
         
     def init_hardware(self):
-        # 1. Try PIGPIO (Hardware DMA-timed PWM - best for MG995 jitter)
-        if HAS_PIGPIO:
+        if HAS_SERVOKIT:
             try:
-                self.pi = pigpio.pi()
-                if self.pi.connected:
-                    self.mode = "PIGPIO"
-                    self.pi.set_mode(self.pan_pin, pigpio.OUTPUT)
-                    self.pi.set_mode(self.tilt_pin, pigpio.OUTPUT)
-                    self.write_angle(self.pan_pin, self.pan_angle)
-                    self.write_angle(self.tilt_pin, self.tilt_angle)
-                    print(f"[SERVO] pigpio connected. Driving hardware MG995 on Pins {self.pan_pin}/{self.tilt_pin}")
-                    return
-            except Exception as e:
-                print(f"[SERVO] pigpio initialization failed: {e}")
-                
-        # 2. Try GPIOZERO (Software PWM Fallback)
-        if HAS_GPIOZERO:
-            try:
-                min_pw = self.pulse_min / 1000000.0
-                max_pw = self.pulse_max / 1000000.0
-                self.servos['pan'] = AngularServo(
-                    self.pan_pin, min_angle=0, max_angle=180,
-                    min_pulse_width=min_pw, max_pulse_width=max_pw
-                )
-                self.servos['tilt'] = AngularServo(
-                    self.tilt_pin, min_angle=0, max_angle=180,
-                    min_pulse_width=min_pw, max_pulse_width=max_pw
-                )
-                self.mode = "GPIOZERO"
-                self.write_angle(self.pan_pin, self.pan_angle)
-                self.write_angle(self.tilt_pin, self.tilt_angle)
-                print(f"[SERVO] gpiozero initialized. Driving hardware MG995 on Pins {self.pan_pin}/{self.tilt_pin}")
+                self.kit = ServoKit(channels=16)
+                self.mode = "SERVOKIT"
+                # Center servos slowly/gently on startup
+                self.write_angle(self.pan_channel, self.pan_angle)
+                self.write_angle(self.tilt_channel, self.tilt_angle)
+                print(f"[SERVO] Adafruit PCA9685 I2C Driver active. Channels: Pan={self.pan_channel}, Tilt={self.tilt_channel}")
                 return
             except Exception as e:
-                print(f"[SERVO] gpiozero initialization failed: {e}")
+                print(f"[SERVO] Adafruit PCA9685 initialization failed: {e}")
                 
-        # 3. Fallback to simulation
         self.mode = "SIMULATION"
         print("[SERVO] Running in Simulation Mode. Virtual angles will be logged.")
 
-    def write_angle(self, pin, angle):
-        pulse_width = self.pulse_min + (angle / 180.0) * (self.pulse_max - self.pulse_min)
-        if self.mode == "PIGPIO" and self.pi:
-            self.pi.set_servo_pulsewidth(pin, int(pulse_width))
-        elif self.mode == "GPIOZERO" and self.servos:
-            key = 'pan' if pin == self.pan_pin else 'tilt'
-            if key in self.servos:
-                self.servos[key].angle = angle
+    def write_angle(self, channel, angle):
+        if channel == self.pan_channel:
+            self.pan_angle = max(self.pan_limits[0], min(self.pan_limits[1], angle))
+            target_angle = self.pan_angle
+        else:
+            self.tilt_angle = max(self.tilt_limits[0], min(self.tilt_limits[1], angle))
+            target_angle = self.tilt_angle
+            
+        if self.mode == "SERVOKIT" and self.kit:
+            try:
+                self.kit.servo[channel].angle = target_angle
+            except Exception as e:
+                print(f"[SERVO ERROR] Failed to write angle {target_angle} to channel {channel}: {e}")
 
     def update_position(self, pan_delta, tilt_delta):
+        # Move horizontal
         self.pan_angle += pan_delta
-        self.pan_angle = max(self.pan_limits[0], min(self.pan_limits[1], self.pan_angle))
-        self.write_angle(self.pan_pin, self.pan_angle)
+        self.write_angle(self.pan_channel, self.pan_angle)
         
+        # Move vertical
         self.tilt_angle += tilt_delta
-        self.tilt_angle = max(self.tilt_limits[0], min(self.tilt_limits[1], self.tilt_angle))
-        self.write_angle(self.tilt_pin, self.tilt_angle)
+        self.write_angle(self.tilt_channel, self.tilt_angle)
         
         return round(self.pan_angle, 1), round(self.tilt_angle, 1)
 
     def set_absolute_position(self, pan_angle, tilt_angle):
-        self.pan_angle = max(self.pan_limits[0], min(self.pan_limits[1], pan_angle))
-        self.write_angle(self.pan_pin, self.pan_angle)
-        
-        self.tilt_angle = max(self.tilt_limits[0], min(self.tilt_limits[1], tilt_angle))
-        self.write_angle(self.tilt_pin, self.tilt_angle)
-        
+        self.write_angle(self.pan_channel, pan_angle)
+        self.write_angle(self.tilt_channel, tilt_angle)
         return round(self.pan_angle, 1), round(self.tilt_angle, 1)
 
     def cleanup(self):
-        if self.mode == "PIGPIO" and self.pi:
-            self.pi.set_servo_pulsewidth(self.pan_pin, 0)
-            self.pi.set_servo_pulsewidth(self.tilt_pin, 0)
-            self.pi.stop()
-            print("[SERVO] pigpio channels shutdown.")
-        elif self.mode == "GPIOZERO" and self.servos:
-            for s in self.servos.values():
-                s.close()
-            print("[SERVO] gpiozero channels closed.")
+        print("[SERVO] Cleaning up. PCA9685 connection closed.")
 
 # =====================================================================
 # 2. MAIN EDGE INTENT TRACKER SYSTEM
@@ -198,8 +159,8 @@ class StandaloneIntentTracker:
         servo_cfg = self.config.get("servos", {})
         pid_cfg = servo_cfg.get("pid", {})
         self.driver = MG995ServoDriver(
-            pan_pin=servo_cfg.get("pan_pin", 18),
-            tilt_pin=servo_cfg.get("tilt_pin", 23)
+            pan_channel=servo_cfg.get("pan_channel", 0),
+            tilt_channel=servo_cfg.get("tilt_channel", 2)
         )
         
         self.pan_pid = PIDController(
