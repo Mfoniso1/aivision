@@ -125,9 +125,13 @@ class LocalGazeEstimator:
         """
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # 1. Detect faces (using high speed multiscale detection)
-        faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(100, 100))
+        # 1. Detect faces (high speed, highly sensitive parameters to catch faces further away or in low light)
+        faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(40, 40))
         if len(faces) == 0:
+            # Helpful visual feedback for face tracking setup
+            if not hasattr(self, "_last_face_miss_time") or time.time() - self._last_face_miss_time > 5.0:
+                print("[DETECTOR] No face detected. Adjust your position, sit closer, or increase room lighting.")
+                self._last_face_miss_time = time.time()
             return None
             
         # Prioritize the largest (closest) face in range
@@ -139,9 +143,11 @@ class LocalGazeEstimator:
         target_y = (fy + fh / 2.0) / frame.shape[0]
         
         # 2. Segment face ROI and detect eye boxes
-        # We only search the upper 60% of the face to avoid picking up the nose/mouth
+        # Search the upper 60% of the face to target eyes and ignore mouth/chin
         face_roi = gray[fy:fy+int(fh*0.6), fx:fx+fw]
-        eyes = self.eye_cascade.detectMultiScale(face_roi, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20))
+        
+        # Highly sensitive eye parameters to detect small eye regions
+        eyes = self.eye_cascade.detectMultiScale(face_roi, scaleFactor=1.05, minNeighbors=3, minSize=(10, 10))
         
         yaw_deg = 0.0
         pitch_deg = 0.0
@@ -178,6 +184,11 @@ class LocalGazeEstimator:
             # Scale displacement to approximate deflection angles (typically +/- 45 deg)
             yaw_deg = -avg_x * 45.0
             pitch_deg = -avg_y * 45.0
+        else:
+            # Log warning if face is detected but eyes are missed
+            if not hasattr(self, "_last_eye_miss_time") or time.time() - self._last_eye_miss_time > 5.0:
+                print("[DETECTOR] Face found, but eyes not detected. Keep your face level and sit directly in front of the lens.")
+                self._last_eye_miss_time = time.time()
             
         gaze_deflection = np.sqrt(yaw_deg**2 + pitch_deg**2)
         intent_score = max(0, min(100, int(100 * (1.0 - (gaze_deflection / 45.0)))))
