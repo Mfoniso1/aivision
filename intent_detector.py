@@ -49,10 +49,54 @@ class LocalGazeEstimator:
 
         if not self.use_mediapipe:
             print("[SYSTEM] Python 3.13 / ARM64 environment detected. Initializing zero-dependency OpenCV Gaze Tracker...")
-            # Load standard OpenCV XML classifiers (packaged natively inside every OpenCV wheel)
-            self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-            self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
-            print("[SYSTEM] OpenCV Haar Cascade Eye-Gaze Tracker loaded successfully!")
+            # Load standard OpenCV XML classifiers safely (downloading them automatically if missing)
+            self.face_cascade = self.load_cascade('haarcascade_frontalface_default.xml')
+            self.eye_cascade = self.load_cascade('haarcascade_eye.xml')
+            
+            if self.face_cascade.empty() or self.eye_cascade.empty():
+                print("[ERROR] OpenCV Haar Cascades failed to load. Gaze tracking will be disabled.")
+            else:
+                print("[SYSTEM] OpenCV Haar Cascade Eye-Gaze Tracker loaded successfully!")
+
+    def load_cascade(self, name):
+        """
+        Safely loads a Haar Cascade XML file, downloading it from the official
+        OpenCV GitHub repository if it is missing from the system.
+        """
+        # 1. Try OpenCV packaged data path
+        sys_path = ""
+        if hasattr(cv2, "data") and cv2.data.haarcascades:
+            sys_path = os.path.join(cv2.data.haarcascades, name)
+            if os.path.exists(sys_path):
+                cascade = cv2.CascadeClassifier(sys_path)
+                if not cascade.empty():
+                    return cascade
+                    
+        # 2. Check local workspace directory
+        local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+        if os.path.exists(local_path):
+            cascade = cv2.CascadeClassifier(local_path)
+            if not cascade.empty():
+                return cascade
+                
+        # 3. Fallback: Download from official OpenCV upstream GitHub repository
+        print(f"[DETECTOR] Cascade XML '{name}' not found locally or in package. Downloading...")
+        url = f"https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/{name}"
+        try:
+            r = requests.get(url, timeout=10.0)
+            if r.status_code == 200:
+                with open(local_path, "wb") as f:
+                    f.write(r.content)
+                print(f"[DETECTOR] Successfully downloaded and saved '{name}' locally!")
+                cascade = cv2.CascadeClassifier(local_path)
+                if not cascade.empty():
+                    return cascade
+            else:
+                print(f"[ERROR] Failed to download {name} from OpenCV repo (HTTP {r.status_code})")
+        except Exception as e:
+            print(f"[ERROR] Exception downloading cascade XML: {e}")
+            
+        return cv2.CascadeClassifier()
 
     def process_frame(self, frame):
         """
@@ -376,9 +420,10 @@ class StandaloneIntentTracker:
         # Local offline gaze mesh engine
         self.local_gaze = None
         if config.API_MODE == "LOCAL":
-            print("[SYSTEM] Initializing Google MediaPipe Face Mesh locally...")
+            print("[SYSTEM] Initializing Local Gaze Engine...")
             self.local_gaze = LocalGazeEstimator()
-            print("[SYSTEM] Local MediaPipe face mesh loaded successfully.")
+            mode_str = "MediaPipe FaceMesh" if self.local_gaze.use_mediapipe else "OpenCV Haar Cascades"
+            print(f"[SYSTEM] Local gaze tracker ({mode_str}) loaded successfully.")
         
         # Threading and Loop parameters
         self.running = False
