@@ -31,24 +31,42 @@ except ImportError:
 
 class LocalGazeEstimator:
     def __init__(self):
-        if not HAS_MEDIAPIPE:
-            raise ImportError(
-                "[ERROR] mediapipe is not installed. To run in 'LOCAL' mode, "
-                "please run 'pip install mediapipe' on your system."
-            )
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,  # Critical: enables iris center tracking (points 468 and 473)
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
+        self.use_mediapipe = HAS_MEDIAPIPE
+        
+        if self.use_mediapipe:
+            try:
+                self.mp_face_mesh = mp.solutions.face_mesh
+                self.face_mesh = self.mp_face_mesh.FaceMesh(
+                    max_num_faces=1,
+                    refine_landmarks=True,  # Critical: enables iris center tracking (points 468 and 473)
+                    min_detection_confidence=0.5,
+                    min_tracking_confidence=0.5
+                )
+                print("[SYSTEM] Local MediaPipe face mesh loaded successfully.")
+            except Exception as e:
+                print(f"[WARNING] Failed to initialize MediaPipe Face Mesh: {e}. Falling back to OpenCV Cascades.")
+                self.use_mediapipe = False
+
+        if not self.use_mediapipe:
+            print("[SYSTEM] Python 3.13 / ARM64 environment detected. Initializing zero-dependency OpenCV Gaze Tracker...")
+            # Load standard OpenCV XML classifiers (packaged natively inside every OpenCV wheel)
+            self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+            print("[SYSTEM] OpenCV Haar Cascade Eye-Gaze Tracker loaded successfully!")
 
     def process_frame(self, frame):
         """
         Processes BGR frame, calculates facial landmarks, and computes gaze yaw/pitch.
         """
-        # Convert BGR frame to RGB for MediaPipe
+        if self.use_mediapipe:
+            return self.process_mediapipe(frame)
+        else:
+            return self.process_cascade(frame)
+
+    def process_mediapipe(self, frame):
+        """
+        Calculates high-fidelity gaze using Google MediaPipe Face Mesh.
+        """
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.face_mesh.process(rgb_frame)
         
@@ -69,40 +87,105 @@ class LocalGazeEstimator:
         r_eye_center = (r_outer + r_inner) / 2.0
         r_iris = np.array([landmarks[473].x, landmarks[473].y, landmarks[473].z])
         
-        # Calculate eye width dimensions as normalizers
         l_width = np.linalg.norm(l_outer - l_inner)
         r_width = np.linalg.norm(r_outer - r_inner)
         
-        # Compute horizontal and vertical pupil displacements
-        # Normalize by eye width to stay invariant to distance from camera
         l_gaze_x = (l_iris[0] - l_eye_center[0]) / (l_width + 1e-6)
         l_gaze_y = (l_iris[1] - l_eye_center[1]) / (l_width * 0.55 + 1e-6)
         
         r_gaze_x = (r_iris[0] - r_eye_center[0]) / (r_width + 1e-6)
         r_gaze_y = (r_iris[1] - r_eye_center[1]) / (r_width * 0.55 + 1e-6)
         
-        # Average left & right gaze vectors
         gaze_x = (l_gaze_x + r_gaze_x) / 2.0
         gaze_y = (l_gaze_y + r_gaze_y) / 2.0
         
-        # Map pupil displacement coordinates to approximate deflection degrees
         yaw_deg = -gaze_x * 45.0
         pitch_deg = -gaze_y * 45.0
         
-        # Compute face center (normalized coords, 0.0 to 1.0)
         x_coords = [lm.x for lm in landmarks]
         y_coords = [lm.y for lm in landmarks]
         target_x = np.mean(x_coords)
         target_y = np.mean(y_coords)
         
-        # Compute intent score (100% when looking straight, drops as gaze deflects)
         gaze_deflection = np.sqrt(yaw_deg**2 + pitch_deg**2)
         intent_score = max(0, min(100, int(100 * (1.0 - (gaze_deflection / 45.0)))))
         
         return {
             "face_detected": True,
-            "target_x": target_x,
-            "target_y": target_y,
+            "target_x": float(target_x),
+            "target_y": float(target_y),
+            "yaw": float(yaw_deg),
+            "pitch": float(pitch_deg),
+            "intent_score": intent_score
+        }
+
+    def process_cascade(self, frame):
+        """
+        Calculates gaze deflection using native OpenCV face and eye Haar Cascade classifiers.
+        """
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # 1. Detect faces (using high speed multiscale detection)
+        faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(100, 100))
+        if len(faces) == 0:
+            return None
+            
+        # Prioritize the largest (closest) face in range
+        faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
+        fx, fy, fw, fh = faces[0]
+        
+        # Calculate normalized face bounding box center (0.0 to 1.0)
+        target_x = (fx + fw / 2.0) / frame.shape[1]
+        target_y = (fy + fh / 2.0) / frame.shape[0]
+        
+        # 2. Segment face ROI and detect eye boxes
+        # We only search the upper 60% of the face to avoid picking up the nose/mouth
+        face_roi = gray[fy:fy+int(fh*0.6), fx:fx+fw]
+        eyes = self.eye_cascade.detectMultiScale(face_roi, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20))
+        
+        yaw_deg = 0.0
+        pitch_deg = 0.0
+        
+        if len(eyes) > 0:
+            # Sort eyes horizontally (left to right)
+            eyes = sorted(eyes, key=lambda e: e[0])
+            displacements = []
+            
+            # Process the first two detected eye regions
+            for (ex, ey, ew, eh) in eyes[:2]:
+                eye_img = face_roi[ey:ey+eh, ex:ex+ew]
+                
+                # Boost contrast and apply smoothing to reduce camera noise
+                eye_img = cv2.equalizeHist(eye_img)
+                blurred = cv2.GaussianBlur(eye_img, (5, 5), 0)
+                
+                # Locate the dark center region of the pupil
+                _, _, min_loc, _ = cv2.minMaxLoc(blurred)
+                
+                # Calculate coordinates relative to the eye crop center
+                eye_center_x = ew / 2.0
+                eye_center_y = eh / 2.0
+                
+                # Normalized pupil deflection ratio (-0.5 to 0.5)
+                g_x = (min_loc[0] - eye_center_x) / ew
+                g_y = (min_loc[1] - eye_center_y) / eh
+                displacements.append((g_x, g_y))
+                
+            # Average tracking displacements across both eyes
+            avg_x = np.mean([d[0] for d in displacements])
+            avg_y = np.mean([d[1] for d in displacements])
+            
+            # Scale displacement to approximate deflection angles (typically +/- 45 deg)
+            yaw_deg = -avg_x * 45.0
+            pitch_deg = -avg_y * 45.0
+            
+        gaze_deflection = np.sqrt(yaw_deg**2 + pitch_deg**2)
+        intent_score = max(0, min(100, int(100 * (1.0 - (gaze_deflection / 45.0)))))
+        
+        return {
+            "face_detected": True,
+            "target_x": float(target_x),
+            "target_y": float(target_y),
             "yaw": float(yaw_deg),
             "pitch": float(pitch_deg),
             "intent_score": intent_score
