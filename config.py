@@ -6,7 +6,7 @@
 API_MODE = "HTTP"
 
 # Remote self-hosted AI model server endpoint (using custom port 5050 and isolated path)
-API_URL = "http://192.168.1.100:5050/api/v1/intent"
+API_URL = "http://127.0.0.1:5050/api/v1/intent"
 API_TIMEOUT = 2.0
 
 # Video source: Can be a remote MJPEG stream URL or a physical camera index (0, 1, etc.)
