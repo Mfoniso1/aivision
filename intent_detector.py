@@ -359,10 +359,33 @@ class StandaloneIntentTracker:
         self.running = True
         print("[SYSTEM] Booting standalone intent detector client loop...")
         
-        # Open Camera
-        cap = cv2.VideoCapture(self.cam_index)
-        if not cap.isOpened():
-            print(f"[FATAL] Cannot open primary camera index {self.cam_index}. Exiting.")
+        # Open Camera with automatic multi-index fallback scan
+        cap = None
+        opened_index = -1
+        
+        # Build search list (trying configured index first, then typical fallbacks)
+        search_indices = [self.cam_index]
+        for fallback in [0, 1, 2, 4]:
+            if fallback not in search_indices:
+                search_indices.append(fallback)
+                
+        for idx in search_indices:
+            print(f"[SYSTEM] Attempting to open camera at index {idx}...")
+            test_cap = cv2.VideoCapture(idx)
+            if test_cap.isOpened():
+                # Verify if we can read a frame (important on Pi where some fake indices open but return empty)
+                ret, _ = test_cap.read()
+                if ret:
+                    cap = test_cap
+                    opened_index = idx
+                    print(f"[SYSTEM] Successfully verified and opened camera index {idx}!")
+                    break
+                test_cap.release()
+            else:
+                test_cap.release()
+            
+        if cap is None:
+            print(f"[FATAL] Cannot open or read from any camera indices {search_indices}. Exiting.")
             return
             
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cam_w)
