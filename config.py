@@ -5,8 +5,8 @@
 # API connection mode: "HTTP" or "WEBSOCKET"
 API_MODE = "HTTP"
 
-# Remote self-hosted AI model server endpoint
-API_URL = "http://192.168.1.100:8000/predict"
+# Remote self-hosted AI model server endpoint (using custom port 5050 and isolated path)
+API_URL = "http://192.168.1.100:5050/api/v1/intent"
 API_TIMEOUT = 2.0
 
 CAMERA_INDEX = 0
