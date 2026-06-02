@@ -2,6 +2,7 @@ import sys
 import os
 import time
 import json
+import config
 
 # Try importing Adafruit PCA9685 ServoKit
 try:
@@ -11,17 +12,17 @@ except ImportError:
     HAS_SERVOKIT = False
 
 class MG995ServoDriver:
-    def __init__(self, pan_channel=0, tilt_channel=2):
-        self.pan_channel = pan_channel
-        self.tilt_channel = tilt_channel
+    def __init__(self, pan_channel=None, tilt_channel=None):
+        self.pan_channel = pan_channel if pan_channel is not None else config.PAN_CHANNEL
+        self.tilt_channel = tilt_channel if tilt_channel is not None else config.TILT_CHANNEL
         
-        # Matches your exact hardware limits (0 to 180 deg)
-        self.pan_limits = (0.0, 180.0)
-        self.tilt_limits = (0.0, 180.0)
+        # Matches your exact hardware limits from config.py
+        self.pan_limits = (config.PAN_MIN, config.PAN_MAX)
+        self.tilt_limits = (config.TILT_MIN, config.TILT_MAX)
         
-        # Matches your exact startup positions from sshkeyboard code
-        self.pan_angle = 180.0
-        self.tilt_angle = 90.0
+        # Matches your exact startup positions from config.py
+        self.pan_angle = config.START_PAN
+        self.tilt_angle = config.START_TILT
         
         self.mode = "SIMULATION"
         self.kit = None
@@ -64,43 +65,35 @@ class MG995ServoDriver:
     def cleanup(self):
         print("[TESTER] PCA9685 connection closed cleanly.")
 
-def load_config():
-    try:
-        with open("config.json", "r") as f:
-            cfg = json.load(f)
-            return cfg.get("servos", {})
-    except Exception:
-        return {"pan_channel": 0, "tilt_channel": 2}
-
 def run_calibration_sweep(driver):
     print("\n=========================================")
     print("  STEP 1: AUTOMATED CALIBRATION SWEEP")
     print("=========================================")
     
     # 1. Align to center
-    print("[1/4] Centering Pan to 180 deg and Tilt to 90 deg...")
-    driver.write_angle(driver.pan_channel, 180.0)
-    driver.write_angle(driver.tilt_channel, 90.0)
+    print(f"[1/4] Centering Pan to {config.START_PAN} deg and Tilt to {config.START_TILT} deg...")
+    driver.write_angle(driver.pan_channel, config.START_PAN)
+    driver.write_angle(driver.tilt_channel, config.START_TILT)
     time.sleep(1.0)
     
     # 2. Sweep Pan horizontal axis
     print("[2/4] Sweeping Pan (Horizontal Axis)...")
-    for angle in [135.0, 90.0, 45.0, 180.0]:
+    for angle in [135.0, 90.0, 45.0, config.START_PAN]:
         print(f"  -> Commanding Pan: {angle} deg")
         driver.write_angle(driver.pan_channel, angle)
         time.sleep(0.8)
         
     # 3. Sweep Tilt vertical axis
     print("[3/4] Sweeping Tilt (Vertical Axis)...")
-    for angle in [60.0, 90.0, 120.0, 90.0]:
+    for angle in [60.0, 90.0, 120.0, config.START_TILT]:
         print(f"  -> Commanding Tilt: {angle} deg")
         driver.write_angle(driver.tilt_channel, angle)
         time.sleep(0.8)
         
     # 4. Final Centering
     print("[4/4] Calibration complete. Servos locked at startup positions.")
-    driver.write_angle(driver.pan_channel, 180.0)
-    driver.write_angle(driver.tilt_channel, 90.0)
+    driver.write_angle(driver.pan_channel, config.START_PAN)
+    driver.write_angle(driver.tilt_channel, config.START_TILT)
     time.sleep(0.5)
 
 def interactive_terminal(driver):
@@ -111,7 +104,7 @@ def interactive_terminal(driver):
     print("Instructions:")
     print("  - Type 'pan <angle>' to command horizontal position (e.g. 'pan 120')")
     print("  - Type 'tilt <angle>' to command vertical position (e.g. 'tilt 60')")
-    print("  - Type 'center' to return to Pan 180 deg, Tilt 90 deg")
+    print(f"  - Type 'center' to return to Pan {config.START_PAN} deg, Tilt {config.START_TILT} deg")
     print("  - Type 'exit' or 'quit' to terminate")
     
     while True:
@@ -122,8 +115,8 @@ def interactive_terminal(driver):
             if cmd in ["exit", "quit", "q"]:
                 break
             if cmd == "center":
-                driver.write_angle(driver.pan_channel, 180.0)
-                driver.write_angle(driver.tilt_channel, 90.0)
+                driver.write_angle(driver.pan_channel, config.START_PAN)
+                driver.write_angle(driver.tilt_channel, config.START_TILT)
                 continue
                 
             parts = cmd.split()
@@ -152,12 +145,7 @@ def interactive_terminal(driver):
 
 if __name__ == "__main__":
     print("[SYSTEM] Starting MG995 Standalone Calibration Tool...")
-    servo_cfg = load_config()
-    
-    driver = MG995ServoDriver(
-        pan_channel=servo_cfg.get("pan_channel", 0),
-        tilt_channel=servo_cfg.get("tilt_channel", 2)
-    )
+    driver = MG995ServoDriver()
     
     try:
         run_calibration_sweep(driver)

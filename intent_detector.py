@@ -6,6 +6,7 @@ import threading
 import cv2
 import numpy as np
 import requests
+import config
 
 # Try importing WebSocket client for streaming mode
 try:
@@ -75,22 +76,21 @@ class PIDController:
         return output
 
 class MG995ServoDriver:
-    def __init__(self, pan_channel=0, tilt_channel=2):
+    def __init__(self, pan_channel=None, tilt_channel=None):
         """
         Dual-axis servo controller designed for physical MG995 servos.
         Uses Adafruit PCA9685 16-Channel I2C driver (ServoKit) on Pi.
         Falls back to high-fidelity console SIMULATION on non-Pi platforms.
         """
-        self.pan_channel = pan_channel
-        self.tilt_channel = tilt_channel
+        self.pan_channel = pan_channel if pan_channel is not None else config.PAN_CHANNEL
+        self.tilt_channel = tilt_channel if tilt_channel is not None else config.TILT_CHANNEL
         
-        # Matches your exact hardware limits (0 to 180 deg)
-        self.pan_limits = (0.0, 180.0)
-        self.tilt_limits = (0.0, 180.0)
+        # Read ranges and startup angles directly from config.py
+        self.pan_limits = (config.PAN_MIN, config.PAN_MAX)
+        self.tilt_limits = (config.TILT_MIN, config.TILT_MAX)
         
-        # Matches your exact startup positions
-        self.pan_angle = 180.0
-        self.tilt_angle = 90.0
+        self.pan_angle = config.START_PAN
+        self.tilt_angle = config.START_TILT
         
         self.mode = "SIMULATION"
         self.kit = None
@@ -151,36 +151,28 @@ class MG995ServoDriver:
 # =====================================================================
 
 class StandaloneIntentTracker:
-    def __init__(self, config_path="config.json"):
-        self.config_path = config_path
-        self.load_config()
+    def __init__(self):
+        # Initialize Actuation using direct python config values
+        self.driver = MG995ServoDriver()
         
-        # Initialize Actuation
-        servo_cfg = self.config.get("servos", {})
-        pid_cfg = servo_cfg.get("pid", {})
-        self.driver = MG995ServoDriver(
-            pan_channel=servo_cfg.get("pan_channel", 0),
-            tilt_channel=servo_cfg.get("tilt_channel", 2)
-        )
-        
+        # Output step limits constrained by config.SERVO_STEP_LIMIT
         self.pan_pid = PIDController(
-            pid_cfg.get("kp_pan", 24.0),
-            pid_cfg.get("ki_pan", 0.05),
-            pid_cfg.get("kd_pan", 0.4),
-            output_limits=(-12.0, 12.0)
+            config.KP_PAN,
+            config.KI_PAN,
+            config.KD_PAN,
+            output_limits=(-config.SERVO_STEP_LIMIT, config.SERVO_STEP_LIMIT)
         )
         self.tilt_pid = PIDController(
-            pid_cfg.get("kp_tilt", 24.0),
-            pid_cfg.get("ki_tilt", 0.05),
-            pid_cfg.get("kd_tilt", 0.4),
-            output_limits=(-12.0, 12.0)
+            config.KP_TILT,
+            config.KI_TILT,
+            config.KD_TILT,
+            output_limits=(-config.SERVO_STEP_LIMIT, config.SERVO_STEP_LIMIT)
         )
         
-        # Intent Dwell State Machine Variables
-        intent_cfg = self.config.get("intent", {})
-        self.cone_threshold = intent_cfg.get("engagement_cone_deg", 22.0)
-        self.dwell_threshold = intent_cfg.get("dwell_time_seconds", 0.6)
-        self.ema_beta = intent_cfg.get("ema_beta", 0.65)
+        # Intent Dwell State Machine Variables from config
+        self.cone_threshold = config.ENGAGEMENT_CONE_DEG
+        self.dwell_threshold = config.DWELL_TIME_SECONDS
+        self.ema_beta = config.SERVO_SMOOTHING
         
         self.state = "IDLE"  # IDLE, SEARCHING, POTENTIAL_INTENT, ENGAGED
         self.potential_start_time = None
@@ -191,36 +183,22 @@ class StandaloneIntentTracker:
         self.smooth_y = 0.5
         
         # Camera Sweep Parameters
-        self.sweep_angle = 90.0
+        self.sweep_angle = config.START_PAN
         self.sweep_direction = 1
         self.sweep_speed = 0.8
         
         # Video Capture Setup
-        cam_cfg = self.config.get("camera", {})
-        self.cam_index = cam_cfg.get("index", 0)
-        self.cam_w = cam_cfg.get("width", 640)
-        self.cam_h = cam_cfg.get("height", 480)
-        self.jpeg_quality = cam_cfg.get("jpeg_quality", 80)
+        self.cam_index = config.CAMERA_INDEX
+        self.cam_w = config.FRAME_WIDTH
+        self.cam_h = config.FRAME_HEIGHT
+        self.jpeg_quality = config.JPEG_QUALITY
         
         # Threading and Loop parameters
         self.running = False
         self.ws_conn = None
-        
-    def load_config(self):
-        try:
-            with open(self.config_path, "r") as f:
-                self.config = json.load(f)
-            print(f"[CONFIG] Successfully loaded: {self.config_path}")
-        except Exception as e:
-            print(f"[CONFIG] Error loading {self.config_path}, using defaults. Error: {e}")
-            self.config = {}
 
     def get_api_details(self):
-        api_cfg = self.config.get("api", {})
-        mode = api_cfg.get("mode", "HTTP").upper()
-        url = api_cfg.get("url", "http://localhost:8000/predict")
-        timeout = api_cfg.get("timeout_seconds", 2.0)
-        return mode, url, timeout
+        return config.API_MODE, config.API_URL, config.API_TIMEOUT
 
     def send_frame_http(self, url, jpeg_bytes, timeout):
         """
@@ -302,7 +280,7 @@ class StandaloneIntentTracker:
                 if self.state in ["IDLE", "SEARCHING"]:
                     self.state = "POTENTIAL_INTENT"
                     self.potential_start_time = time.time()
-                    print("[INTENT] Potential interaction intent detected. Initiating dwell confirmation...")
+                    print("[INTENT] Potential interaction intent detected. Confirming dwell time...")
                     
                 elif self.state == "POTENTIAL_INTENT":
                     dwell_duration = time.time() - self.potential_start_time
@@ -323,11 +301,20 @@ class StandaloneIntentTracker:
                 error_x = 0.5 - self.smooth_x
                 error_y = 0.5 - self.smooth_y
                 
+                # Apply deadzone (convert normalized errors to pixel dimensions)
+                pixel_error_x = error_x * config.FRAME_WIDTH
+                pixel_error_y = error_y * config.FRAME_HEIGHT
+                
+                if abs(pixel_error_x) < config.DEADZONE_X:
+                    error_x = 0.0
+                if abs(pixel_error_y) < config.DEADZONE_Y:
+                    error_y = 0.0
+                
                 pan_delta = self.pan_pid.compute(error_x)
                 tilt_delta = self.tilt_pid.compute(error_y)
                 
                 p_angle, t_angle = self.driver.update_position(pan_delta, tilt_delta)
-                print(f"[TRACKING] Active Servo Adjust -> Pan: {p_angle} Tilt: {t_angle} | Intent Score: {telemetry.get('intent_score', 100)}%")
+                print(f"[TRACKING] Servo Adjust -> Pan: {p_angle} Tilt: {t_angle} | Intent Score: {telemetry.get('intent_score', 100)}%")
                 
             else:
                 # Potential intent or search mode: perform standard searching sweep
@@ -350,8 +337,8 @@ class StandaloneIntentTracker:
             if self.state != "IDLE":
                 print("[INTENT] Target lost. Servos holding in search IDLE.")
             self.state = "IDLE"
-            # Return tilt gently to center
-            tilt_error = 90.0 - self.driver.tilt_angle
+            # Return tilt gently to startup center
+            tilt_error = config.START_TILT - self.driver.tilt_angle
             tilt_delta = 0.05 * tilt_error
             self.driver.set_absolute_position(self.driver.pan_angle, self.driver.tilt_angle + tilt_delta)
         else:
@@ -364,7 +351,7 @@ class StandaloneIntentTracker:
                 self.sweep_direction = 1
                 
             # Keep tilt centered
-            tilt_error = 90.0 - self.driver.tilt_angle
+            tilt_error = config.START_TILT - self.driver.tilt_angle
             tilt_delta = 0.05 * tilt_error
             self.driver.set_absolute_position(self.sweep_angle, self.driver.tilt_angle + tilt_delta)
 
@@ -448,10 +435,5 @@ class StandaloneIntentTracker:
             print("[SYSTEM] Camera, sockets, and hardware drivers terminated cleanly. Safe shutdown completed.")
 
 if __name__ == "__main__":
-    # Check if a different config file was supplied via CLI
-    config_file = "config.json"
-    if len(sys.argv) > 1:
-        config_file = sys.argv[1]
-        
-    tracker = StandaloneIntentTracker(config_path=config_file)
+    tracker = StandaloneIntentTracker()
     tracker.run()
